@@ -106,13 +106,18 @@ function Get-ValidEmail {
 function Get-WebhookUrl {
     Write-Host ""
     Write-Host "Incoming Webhook URL for end-to-end testing (optional)."
-    Write-Host "Lets you send a real Teams message to yourself to test the full pipeline."
+    Write-Host "Sends a real Teams message to yourself to test the full alert pipeline."
     Write-Host ""
-    Write-Host "HOW TO GET ONE:"
-    Write-Host "  1. In Teams open a Channel you own (or create a test channel)"
-    Write-Host "  2. Click '...' next to channel name -> Connectors"
-    Write-Host "  3. Find 'Incoming Webhook' -> Configure -> name it -> Copy URL"
-    Write-Host "  In new Teams: Apps -> search 'Incoming Webhook' if Connectors is missing"
+    Write-Host "HOW TO SET UP (Power Automate Workflows - Connectors retired Dec 2025):"
+    Write-Host "  1. In Teams, click '...' next to any channel you own"
+    Write-Host "  2. Select 'Workflows'"
+    Write-Host "  3. Search for 'Post to a channel when a webhook request is received'"
+    Write-Host "  4. Click it -> authenticate your account -> select your Team and Channel"
+    Write-Host "  5. Click 'Add workflow'"
+    Write-Host "  6. Copy the URL shown and paste it below"
+    Write-Host ""
+    Write-Host "  NOTE: If 'Workflows' is missing from the menu, IT has Power Automate"
+    Write-Host "  blocked. Skip this step and ask a colleague to send a test message instead."
     Write-Host ""
     Write-Host "Press Enter to skip - you can add it later by deleting the config file."
     return (Read-Host "Paste webhook URL (or press Enter to skip)").Trim()
@@ -168,18 +173,34 @@ function Run-Setup {
 # ------------------------------------------------------------------------------
 
 function Send-TestTeamsMessage {
-    # Posts a message to Teams via Incoming Webhook, triggering a real notification.
-    # Use this to test the full pipeline - Teams notification -> script -> email alert.
-    param([string]$Text = "TeamsMessageAlerter test - if you receive an email alert this is working!")
+    # Posts a message to Teams via Power Automate Workflow webhook.
+    # Uses Adaptive Card format required by the new workflow template.
+    # Old MessageCard format {"text":"..."} no longer works after Connector retirement Dec 2025.
+    param([string]$Text = "TeamsMessageAlerter test - if you receive an email alert the pipeline is working!")
 
     if ([string]::IsNullOrEmpty($script:WebhookUrl)) {
-        Write-Log "Test skipped - no webhook URL configured. Delete config file and re-run to add one."
+        Write-Log "Test skipped - no webhook URL configured. Delete config file and re-run setup to add one."
         return $false
     }
     try {
-        $body = @{ text = $Text } | ConvertTo-Json
-        Invoke-RestMethod -Uri $script:WebhookUrl -Method Post -Body $body -ContentType "application/json" | Out-Null
-        Write-Log "Test message posted to Teams via webhook. Waiting for notification to appear..."
+        $adaptiveCard = @{
+            type    = "AdaptiveCard"
+            version = "1.2"
+            body    = @(
+                @{ type = "TextBlock"; text = $Text; wrap = $true }
+            )
+        }
+        $payload = @{
+            attachments = @(
+                @{
+                    contentType = "application/vnd.microsoft.card.adaptive"
+                    content     = $adaptiveCard
+                }
+            )
+        } | ConvertTo-Json -Depth 10
+
+        Invoke-RestMethod -Uri $script:WebhookUrl -Method Post -Body $payload -ContentType "application/json" | Out-Null
+        Write-Log "Test message posted to Teams. Watch for the notification then check your email for the alert..."
         return $true
     } catch {
         Write-Log "Failed to post test message: $_"
